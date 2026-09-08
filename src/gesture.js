@@ -1,17 +1,18 @@
-// Positions are transformed into a palm-relative basis before velocity estimation.
+// Pose transition, not speed. Other fingers may relax after loading.
 export class FlickGesture {
   constructor(){this.reset()}
-  reset(){this.state='idle';this.since=0;this.previous=null;this.cooldown=0}
-  update({time,closed,contact,relative,threshold=.5}){
-    const previous=this.previous;this.previous={time,relative};
+  reset(){this.state='idle';this.since=0;this.upSince=null;this.cooldown=0;this.lastTime=null;this.loadedRadial=0}
+  update({time,loadPose,thumbUp,radial=0}){
+    if(this.lastTime!==null&&(time-this.lastTime>.15||time<this.lastTime))this.reset();
+    this.lastTime=time;
     if(time<this.cooldown)return false;
-    if(this.state==='idle'){if(closed&&contact){this.state='holding';this.since=time}}
-    else if(this.state==='holding'){if(!closed||!contact)this.state='idle';else if(time-this.since>.22)this.state='armed'}
+    if(this.state==='idle'){if(loadPose&&!thumbUp){this.state='holding';this.since=time}}
+    else if(this.state==='holding'){if(!loadPose||thumbUp)this.state='idle';else if(time-this.since>=.18){this.state='armed';this.loadedRadial=radial}}
     else if(this.state==='armed'){
-      const dt=previous?time-previous.time:0;
-      const velocity=dt>.005&&dt<.1?(relative[1]-previous.relative[1])/dt:0;
-      if(closed&&!contact&&velocity>threshold){this.state='idle';this.cooldown=time+.65;return true}
-      if(!closed){this.state='idle'}
+      if(thumbUp&&radial-this.loadedRadial>.18){
+        this.upSince??=time;
+        if(time-this.upSince>=.045){this.state='idle';this.cooldown=time+.6;this.upSince=null;return true}
+      }else this.upSince=null;
     }
     return false;
   }
