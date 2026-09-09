@@ -19,7 +19,9 @@ npm run build
 
 - Quest 3：在 Meta Quest Browser 打开 HTTPS 页面，开启手部追踪、放下控制器，选择沉浸模式；设备支持时可选透视模式。
 - Vision Pro：使用支持 WebXR 的 Safari（visionOS 2 或更新版本），选择沉浸模式并允许手部追踪。使用 immersive-vr；不依赖 immersive-ar 或 gaze/pinch 输入。
-- 会话强制要求 hand-tracking；缺失支持或拒绝权限会显示错误，不会偷偷改成捏合手势。
+- PICO 4：使用头显内支持 WebXR 的 PICO Browser，通过 HTTPS 打开，更新系统和浏览器后进入沉浸模式。浏览器提供 WebXR Hand Input 时可用相同拇指手势；系统具备手追不等于浏览器开放手部关节接口，旧版浏览器可能只支持控制器。
+- V4 按能力协商可选 hand-tracking，支持控制器兼容模式：拿起控制器，朝目标瞄准，扣动扳机发射；不会把凝视或捏合事件当作控制器发射。沉浸空间内会提示当前输入方式或等待追踪。
+- 透视按钮仅在浏览器报告支持 immersive-ar 时显示，不按头显品牌假设支持。
 - 使用 local 参考空间，头部位姿由 WebXR 驱动，支持平移和旋转；无人工移动或镜头震动。
 - 退出使用头显系统的结束沉浸体验操作。
 
@@ -35,13 +37,16 @@ V3 雷电：蓝白主干、三层蓝色光晕、10 处分叉与细支电弧，24
 
 - src/coin.js：加载 src/coin-model.glb，合并正反面、居中并缩放至 36mm。网页底部可下载原 GLB。
 - src/gesture.js：无渲染依赖的手势状态机。
-- src/main.js：WebXR 生命周期、关节可视化、射击与闪电。
+- src/main.js：WebXR 生命周期、射击与闪电。
+- src/hand-outline.js：沿手掌及五指边缘绘制白色虚线，取消蓝色关节点。每手一个实例化网格，线宽使用真实空间尺寸；关节缺失时隐藏轮廓。
+- src/xr-input.js：可选手追能力协商和 6DOF 控制器瞄准发射。
+- test/hand-input.test.js：左右手及弯指轮廓、6DOF 变换、追踪丢失和控制器/凝视输入区分测试。
 - test/model-effects.test.js：验证 GLB 双面朝向、36mm 直径及雷电 2.5 秒消失。
 - test/gesture.test.js：装填、弹射、冷却、慢速释放、张手取消及追踪重置测试。
 
 ## 真机验收（尚未在设备上执行）
 
-1. 两款头显分别验证允许/拒绝手部权限，以及退出后重新进入。
+1. Quest 3、Vision Pro、PICO 4 分别验证允许/拒绝手部权限，以及退出后重新进入。PICO 4 额外验证不提供手部接口的浏览器仍可通过控制器操作。
 2. 左右手各连续装填/弹射 20 次，调整姿态阈值。
 3. 握拳整体移动、转腕、张手以及手出视野，不应发射；装填后竖起拇指应发射一次。
 4. 走动、侧身、低头检查 6DOF、硬币贴合位置；Quest 验证透视背景。
@@ -50,9 +55,10 @@ V3 雷电：蓝白主干、三层蓝色光晕、10 处分叉与细支电弧，24
 ## 参考
 
 - https://developers.meta.com/horizon/documentation/web/webxr-hands/
+- https://developer.picoxr.com/document/web/webxr/
 - https://webkit.org/blog/15162/introducing-natural-input-for-webxr-in-apple-vision-pro/
 - https://webkit.org/blog/15865/webkit-features-in-safari-18-0/
 - https://developer.apple.com/videos/play/wwdc2024/10066/
 - https://toaru-project.com/railgun_t/chara/mikoto.html
 
-浏览器接口兼容性依据以上官方资料；不等于已经通过 Quest 3 / Vision Pro 真机测试。
+浏览器接口兼容性依据以上官方资料；不等于已经通过 Quest 3 / Vision Pro / PICO 4 真机测试。PICO 官方当前文档描述 PICO OS 6 的 WebXR 手追能力，不能据此保证所有 PICO 4 系统版本均开放手部接口。
