@@ -1,9 +1,24 @@
 import * as T from 'three';
-import {SVGLoader} from 'three/addons/loaders/SVGLoader.js';
-export const front=`<path d="M48 18 L53 12 L58 18 L57 57 L64 66 L59 74 L53 70 L47 74 L42 66 L49 57Z M51 22 L55 22 L55 53 L51 53Z"/><path d="M45 23 C18 14 13 42 23 56 L43 44 L45 38 C27 24 19 36 25 49 L29 46 C25 35 34 32 44 39Z M61 23 C88 14 93 42 83 56 L63 44 L61 38 C79 24 87 36 81 49 L77 46 C81 35 72 32 62 39Z M24 61 L29 70 L43 53 L38 50Z M82 61 L77 70 L63 53 L68 50Z M24 73 L82 73 L79 84 L27 84Z M28 76 L78 76 L77 80 L29 80Z"/><path d="M34 89 L38 86 L41 89 L39 93 L35 94 L32 91Z M46 88 L50 86 L54 90 L51 95 L47 94 L44 91Z M59 89 L63 86 L68 89 L66 93 L60 94 L57 92Z M72 86 L75 88 L73 92 L69 91Z"/>`;
-export const back=`<path d="M40 20 L66 20 L66 86 L40 86Z M43 23 L63 23 L63 83 L43 83Z M48 27 L53 25 L59 28 L58 31 L53 29 L47 32Z M48 35 L59 33 L57 38 L51 39 L47 37Z M51 41 L55 41 L55 46 L60 48 L54 51 L47 49 L48 46 L51 47Z M47 55 L52 53 L59 55 L58 58 L52 57 L48 60Z M48 63 L52 60 L54 66 L60 64 L58 69 L49 70Z M47 74 L60 72 L58 77 L49 79Z M33 26 C18 38 18 64 33 78 L35 73 C23 58 24 43 35 32Z M73 26 C88 38 88 64 73 78 L71 73 C83 58 82 43 71 32Z M31 39 L28 47 L33 47Z M75 39 L78 47 L73 47Z M28 57 L31 66 L34 57Z M78 57 L75 66 L72 57Z"/>`;
-function svg(inner){let rim='';for(let i=0;i<48;i++)rim+=`<path transform="rotate(${i*7.5} 53 53)" d="M52 5 L54 5 L54 8 L52 8Z"/>`;return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 106 106"><g fill="#b7c7cf" fill-rule="evenodd"><path d="M53 2 A51 51 0 1 1 52.999 2Z M53 4 A49 49 0 1 0 53.001 4Z M53 10 A43 43 0 1 1 52.999 10Z M53 12 A41 41 0 1 0 53.001 12Z"/>${rim}${inner}</g></svg>`}
-export const frontSVG=svg(front),backSVG=svg(back);
-const silver=new T.MeshStandardMaterial({color:0xb6c8d4,metalness:.85,roughness:.28});
-export function coin(){const g=new T.Group();const disk=new T.Mesh(new T.CylinderGeometry(.012,.012,.0018,64),new T.MeshStandardMaterial({color:0x45545f,metalness:.85,roughness:.34}));disk.rotation.x=Math.PI/2;g.add(disk);for(const [s,z,rotation]of [[frontSVG,.001,0],[backSVG,-.001,Math.PI]]){const face=new T.Group();const data=new SVGLoader().parse(s);for(const path of data.paths){for(const shape of SVGLoader.createShapes(path)){const geo=new T.ExtrudeGeometry(shape,{depth:.6,bevelEnabled:false,curveSegments:8});geo.translate(-53,-53,0);geo.scale(.024/106,.024/106,.00015);const m=new T.Mesh(geo,silver);face.add(m)}}face.scale.y=-1;face.rotation.y=rotation;face.position.z=z;g.add(face)}return g}
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+export const COIN_DIAMETER=.036;
+export const COIN_RADIUS=COIN_DIAMETER/2;
+export const COIN_MODEL_URL=new URL('./coin-model.glb',import.meta.url).href;
 
+// The supplied prop contains two separate relief shells laid side by side.
+export function assembleCoin(source){
+  const coin=new T.Group();coin.name='Double-sided arcade coin, 36mm';
+  for(const [name,back] of [['mskcoincrown_0',false],['mskcoincrown001_1',true]]){
+    const original=source.getObjectByName(name);
+    if(!original)throw new Error('硬币模型缺少正面或反面');
+    const shell=original.clone(true);
+    const bounds=new T.Box3().setFromObject(shell),size=bounds.getSize(new T.Vector3()),center=bounds.getCenter(new T.Vector3());
+    const centered=new T.Group();centered.add(shell);centered.position.set(-center.x,-bounds.min.y,-center.z);
+    const plane=new T.Group();plane.add(centered);plane.rotation.x=Math.PI/2;
+    const face=new T.Group();face.name=back?'reverse':'obverse';face.add(plane);face.rotation.y=back?Math.PI:0;
+    face.scale.setScalar(COIN_DIAMETER/Math.max(size.x,size.z));coin.add(face);
+  }
+  const metal=new T.MeshStandardMaterial({color:0xbac4ce,metalness:.82,roughness:.3});
+  coin.traverse(object=>{if(object.isMesh){object.material=metal;object.castShadow=false;object.receiveShadow=false}});
+  return coin;
+}
+export async function coin(){const gltf=await new GLTFLoader().loadAsync(COIN_MODEL_URL);return assembleCoin(gltf.scene)}
