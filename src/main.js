@@ -4,6 +4,8 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {coin,COIN_RADIUS,COIN_MODEL_URL} from './coin.js';
 import {FlickGesture} from './gesture.js';
 import {Lightning,LIGHTNING_LIFETIME} from './lightning.js';
+import {HandOutline} from './hand-outline.js';
+import {controllerAim,sessionOptions} from './xr-input.js';
 import './style.css';
 const $=s=>document.querySelector(s),status=s=>$('#status').textContent=s;
 const renderer=new T.WebGLRenderer({canvas:$('#scene'),antialias:true,alpha:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.xr.enabled=true;renderer.xr.setReferenceSpaceType('local');renderer.setClearColor(0x050c14,1);
@@ -27,10 +29,20 @@ function shoot(origin,direction){
   $('#shots').textContent=String(++shots).padStart(3,'0');status('已发射 · 扣回拇指重新装填');
 }
 function demo(){if(session)return;shoot(preview.position.clone(),new T.Vector3(-.4,.2,-1));turn+=Math.PI*2}$('#demo').onclick=demo;window.addEventListener('keydown',e=>{if(e.code==='Space'&& !['INPUT','BUTTON'].includes(document.activeElement.tagName)){e.preventDefault();demo()}});$('#flip').onclick=()=>turn+=Math.PI;
-const handStates=new Map(),jointGeo=new T.SphereGeometry(1,6,4),jointMat=new T.MeshBasicMaterial({color:0x79d7ff});
-function getState(source){if(!handStates.has(source)){const held=coinTemplate.clone(true);held.visible=false;scene.add(held);const dots=new T.InstancedMesh(jointGeo,jointMat,25);dots.instanceMatrix.setUsage(T.DynamicDrawUsage);dots.frustumCulled=false;scene.add(dots);handStates.set(source,{gesture:new FlickGesture(),held,dots})}return handStates.get(source)}
-function clearHands(){for(const s of handStates.values()){scene.remove(s.held,s.dots);s.dots.dispose()}handStates.clear()}
-function updateHands(frame,time){const reference=renderer.xr.getReferenceSpace();const active=new Set();for(const source of session.inputSources){if(!source.hand)continue;active.add(source);const state=getState(source),j={};let n=0;const matrix=new T.Matrix4();for(const [name,joint]of source.hand){const pose=frame.getJointPose(joint,reference);if(pose){const p=pose.transform.position;j[name]=new T.Vector3(p.x,p.y,p.z);matrix.makeScale(pose.radius||.006,pose.radius||.006,pose.radius||.006);matrix.setPosition(j[name]);state.dots.setMatrixAt(n++,matrix)}}state.dots.count=n;state.dots.instanceMatrix.needsUpdate=true;
+const handStates=new Map(),controllerStates=new Map();
+const hudCanvas=document.createElement('canvas');hudCanvas.width=1024;hudCanvas.height=128;
+const hudTexture=new T.CanvasTexture(hudCanvas),hud=new T.Sprite(new T.SpriteMaterial({map:hudTexture,depthTest:false,depthWrite:false,toneMapped:false}));
+hud.scale.set(.72,.09,1);hud.position.set(0,-.26,-.8);hud.visible=false;camera.add(hud);scene.add(camera);let hudText='';
+function showInputHint(text){if(text===hudText)return;hudText=text;const c=hudCanvas.getContext('2d');c.clearRect(0,0,1024,128);c.fillStyle='rgba(5,12,20,.8)';c.fillRect(0,0,1024,128);c.fillStyle='white';c.font='32px sans-serif';c.textAlign='center';c.fillText(text,512,76);hudTexture.needsUpdate=true}
+function getState(source){if(!handStates.has(source)){const held=coinTemplate.clone(true);held.visible=false;scene.add(held);const outline=new HandOutline(scene);handStates.set(source,{gesture:new FlickGesture(),held,outline})}return handStates.get(source)}
+function clearHands(){for(const s of handStates.values()){scene.remove(s.held);s.outline.dispose()}handStates.clear();for(const mesh of controllerStates.values())scene.remove(mesh);controllerStates.clear()}
+function updateHands(frame,time){const reference=renderer.xr.getReferenceSpace();const active=new Set();let handCount=0,controllerCount=0;
+for(const mesh of controllerStates.values())mesh.visible=false;
+for(const source of session.inputSources){
+if(!source.hand){const aim=controllerAim(source,frame,reference);if(aim){controllerCount++;if(!controllerStates.has(source)){const mesh=coinTemplate.clone(true);scene.add(mesh);controllerStates.set(source,mesh)}const mesh=controllerStates.get(source);mesh.visible=true;mesh.position.copy(aim.origin);mesh.quaternion.copy(aim.rotation)}continue}
+active.add(source);const state=getState(source),j={},radii={};
+if(typeof frame.getJointPose==='function')for(const [name,joint]of source.hand){const pose=frame.getJointPose(joint,reference);if(pose){const p=pose.transform.position;j[name]=new T.Vector3(p.x,p.y,p.z);radii[name]=pose.radius}}
+state.outline.update(j,radii);if(state.outline.mesh.count)handCount++;
 const keys=['wrist','thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip','index-finger-phalanx-intermediate','index-finger-phalanx-proximal','pinky-finger-phalanx-proximal','middle-finger-phalanx-proximal','middle-finger-tip','ring-finger-tip','pinky-finger-tip'];if(keys.some(k=>!j[k])){state.held.visible=false;state.gesture.reset();continue}
 const wrist=j.wrist,thumb=j['thumb-tip'],middle=j['middle-finger-phalanx-proximal'];const scale=middle.distanceTo(wrist);if(scale<.025){state.gesture.reset();state.held.visible=false;continue}
 const forward=middle.clone().sub(wrist).normalize(),side=j['index-finger-phalanx-proximal'].clone().sub(j['pinky-finger-phalanx-proximal']).normalize(),normal=new T.Vector3().crossVectors(side,forward).normalize();side.crossVectors(forward,normal).normalize();
@@ -52,10 +64,13 @@ if(fired)shoot(state.held.position,forward);
 if(state.held.visible)status('硬币就绪 · 竖起拇指发射');
 }
 
-for(const [source,s]of handStates){if(!active.has(source)){s.held.visible=false;s.dots.count=0;s.gesture.reset()}}}
-async function enter(mode){let next;$('#enter').disabled=true;$('#ar').disabled=true;try{next=await navigator.xr.requestSession(mode,{requiredFeatures:['hand-tracking'],optionalFeatures:['local-floor']});session=next;next.addEventListener('end',()=>{session=null;clearHands();preview.visible=ring.visible=grid.visible=true;renderer.setClearColor(0x050c14,1);scene.fog=new T.FogExp2(0x050c14,.035);$('main').style.display='';$('#enter').disabled=false;$('#ar').disabled=false;status('实验已结束')},{once:true});await renderer.xr.setSession(next);preview.visible=ring.visible=false;grid.visible=mode!=='immersive-ar';renderer.setClearColor(0x050c14,mode==='immersive-ar'?0:1);scene.fog=mode==='immersive-ar'?null:new T.FogExp2(0x050c14,.035);$('main').style.display='none'}catch(e){if(next)await next.end().catch(()=>{});session=null;$('#support').textContent=`无法进入：${e.message}。请启用并允许手部追踪。`;$('#enter').disabled=false;$('#ar').disabled=false}}
+for(const [source,s]of handStates){if(!active.has(source)){s.held.visible=false;s.outline.hide();s.gesture.reset()}}
+for(const [source,mesh]of controllerStates)if(!Array.from(session.inputSources).includes(source)){scene.remove(mesh);controllerStates.delete(source)}
+showInputHint(handCount?'扣回拇指装填 · 竖起拇指发射':controllerCount?'控制器模式 · 瞄准后扣动扳机':'等待手部追踪 · 也可拿起控制器发射');
+}
+async function enter(mode){let next;$('#enter').disabled=true;$('#ar').disabled=true;try{next=await navigator.xr.requestSession(mode,sessionOptions);session=next;next.addEventListener('select',event=>{const aim=controllerAim(event.inputSource,event.frame,renderer.xr.getReferenceSpace());if(aim)shoot(aim.origin,aim.direction)});next.addEventListener('end',()=>{session=null;hud.visible=false;clearHands();preview.visible=ring.visible=grid.visible=true;renderer.setClearColor(0x050c14,1);scene.fog=new T.FogExp2(0x050c14,.035);$('main').style.display='';$('#enter').disabled=false;$('#ar').disabled=false;status('实验已结束')},{once:true});await renderer.xr.setSession(next);hud.visible=true;preview.visible=ring.visible=false;grid.visible=mode!=='immersive-ar';renderer.setClearColor(0x050c14,mode==='immersive-ar'?0:1);scene.fog=mode==='immersive-ar'?null:new T.FogExp2(0x050c14,.035);$('main').style.display='none'}catch(e){if(next)await next.end().catch(()=>{});session=null;$('#support').textContent=`无法进入：${e.message}。请检查浏览器的 WebXR 权限和设备支持。`;$('#enter').disabled=false;$('#ar').disabled=false}}
 $('#enter').onclick=()=>enter('immersive-vr');$('#ar').onclick=()=>enter('immersive-ar');
-async function check(){if(!isSecureContext||!navigator.xr){$('#enter').disabled=true;$('#support').textContent='桌面可预览；头显请通过 HTTPS 打开并启用手部追踪。';return}try{const vr=await navigator.xr.isSessionSupported('immersive-vr'),ar=await navigator.xr.isSessionSupported('immersive-ar');$('#enter').disabled=!vr;$('#ar').hidden=!ar;$('#support').textContent=vr?'已检测到 WebXR · 进入后请允许手部追踪':'当前浏览器不支持沉浸模式，可使用桌面预览'}catch(e){$('#support').textContent=e.message}}check();
+async function check(){if(!isSecureContext||!navigator.xr){$('#enter').disabled=true;$('#support').textContent='桌面可预览；头显请通过 HTTPS 打开并启用手部追踪。';return}try{const vr=await navigator.xr.isSessionSupported('immersive-vr'),ar=await navigator.xr.isSessionSupported('immersive-ar');$('#enter').disabled=!vr;$('#ar').hidden=!ar;$('#support').textContent=vr?'已检测到 WebXR · 支持手势或控制器扳机发射':'当前浏览器不支持沉浸模式，可使用桌面预览'}catch(e){$('#support').textContent=e.message}}check();
 renderer.setAnimationLoop((ms,frame)=>{const time=ms/1000,dt=Math.min(time-last,.04);last=time;const charge=chargeGeometry.attributes.position;for(let k=0;k<charge.count;k++){const angle=k/(charge.count-1)*Math.PI*2;const radius=COIN_RADIUS+.003+(Math.random()-.5)*.003;charge.setXYZ(k,Math.cos(angle)*radius,Math.sin(angle)*radius,.002+(Math.random()-.5)*.002)}charge.needsUpdate=true;chargeGeometry.computeBoundingSphere();if(frame&&session)updateHands(frame,time);else{controls.update();preview.rotation.y+=((turn-.5)-preview.rotation.y)*.06;preview.position.y=1.5+Math.sin(time)*.025;ring.rotation.z=time*.05}for(let i=particles.length-1;i>=0;i--){
   const p=particles[i];p.age+=dt;p.mesh.position.copy(p.origin).addScaledVector(p.velocity,p.age);p.mesh.rotation.x+=dt*26;p.mesh.visible=p.age<18/22;p.trail.update(p.age);
   for(const target of targets){if(target.position.distanceTo(p.mesh.position)<.35)target.material.color.setHex(0xc8f6ff)}
